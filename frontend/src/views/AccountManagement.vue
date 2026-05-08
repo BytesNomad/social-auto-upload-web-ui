@@ -98,7 +98,7 @@
           <div class="platform-picker">
             <div v-for="p in platformOptions" :key="p.value"
               :class="['platform-card', { active: accountForm.platform === p.label, disabled: dialogType === 'edit' || sseConnecting }]"
-              @click="!(dialogType === 'edit' || sseConnecting) && (accountForm.platform = p.label)">
+              @click="selectPlatform(p.label)">
               <div class="platform-icon" :style="{ background: p.bg }">
                 <span :style="{ color: p.color }">{{ p.icon }}</span>
               </div>
@@ -293,6 +293,12 @@ const rules = {
 const sseConnecting = ref(false)
 const qrCodeData = ref('')
 const loginStatus = ref('')
+
+const selectPlatform = (label) => {
+  if (dialogType.value === 'edit' || sseConnecting.value) return
+  accountForm.platform = label
+  accountFormRef.value?.validateField('platform')
+}
 
 const handleAddAccount = () => {
   dialogType.value = 'add'
