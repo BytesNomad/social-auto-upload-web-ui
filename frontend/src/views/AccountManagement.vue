@@ -24,9 +24,13 @@
           />
         </div>
         <div class="toolbar-right">
-          <el-button @click="fetchAccounts" :loading="appStore.isAccountRefreshing">
-            <el-icon v-if="!appStore.isAccountRefreshing"><Refresh /></el-icon>
+          <el-button @click="fetchAccountsQuick">
+            <el-icon><Refresh /></el-icon>
             刷新
+          </el-button>
+          <el-button @click="fetchAccounts" :loading="appStore.isAccountRefreshing">
+            <el-icon v-if="!appStore.isAccountRefreshing"><Loading /></el-icon>
+            批量检查
           </el-button>
           <el-button type="primary" @click="handleAddAccount">添加账号</el-button>
         </div>
@@ -36,7 +40,7 @@
         <el-table :data="filteredAccounts" style="width: 100%">
           <el-table-column label="头像" width="70">
             <template #default="scope">
-              <el-avatar :src="getDefaultAvatar(scope.row.name)" :size="36" />
+              <el-avatar :src="scope.row.avatar || getDefaultAvatar(scope.row.name)" :size="36" />
             </template>
           </el-table-column>
           <el-table-column prop="name" label="名称" width="180">
@@ -66,7 +70,12 @@
             <template #default="scope">
               <div class="action-cell">
                 <button class="action-btn" @click="handleEdit(scope.row)">编辑</button>
-                <button class="action-btn primary" @click="handleDownloadCookie(scope.row)">
+                <button class="action-btn primary" @click="handleSyncProfile(scope.row)"
+                  :disabled="syncingIds.has(scope.row.id)">
+                  <el-icon v-if="syncingIds.has(scope.row.id)" class="is-loading"><Loading /></el-icon>
+                  {{ syncingIds.has(scope.row.id) ? '同步中' : '同步资料' }}
+                </button>
+                <button class="action-btn info" @click="handleDownloadCookie(scope.row)">
                   <el-icon><Download /></el-icon> Cookie
                 </button>
                 <button class="action-btn info" @click="handleUploadCookie(scope.row)">
@@ -106,11 +115,11 @@
             </div>
           </div>
         </el-form-item>
-        <el-form-item label="名称" prop="name">
+        <el-form-item v-if="dialogType === 'edit'" label="名称" prop="name">
           <el-input
             v-model="accountForm.name"
-            placeholder="请输入账号名称"
-            :disabled="sseConnecting"
+            placeholder="扫码后自动同步"
+            disabled
           />
         </el-form-item>
 
@@ -185,12 +194,7 @@ const fetchAccountsQuick = async () => {
   try {
     const res = await accountApi.getAccounts()
     if (res.code === 200 && res.data) {
-      const accountsWithPendingStatus = res.data.map(account => {
-        const updatedAccount = [...account];
-        updatedAccount[4] = -1;
-        return updatedAccount;
-      });
-      accountStore.setAccounts(accountsWithPendingStatus);
+      accountStore.setAccounts(res.data)
     }
   } catch (error) {
     console.error('快速获取账号数据失败:', error)
@@ -219,24 +223,8 @@ const fetchAccounts = async () => {
   }
 }
 
-const validateAllAccountsInBackground = async () => {
-  setTimeout(async () => {
-    try {
-      const res = await accountApi.getValidAccounts()
-      if (res.code === 200 && res.data) {
-        accountStore.setAccounts(res.data)
-      }
-    } catch (error) {
-      console.error('后台验证账号失败:', error)
-    }
-  }, 0)
-}
-
 onMounted(() => {
   fetchAccountsQuick()
-  setTimeout(() => {
-    validateAllAccountsInBackground()
-  }, 100)
 })
 
 const getPlatformTagType = (platform) => {
@@ -286,8 +274,7 @@ const accountFormRef = ref(null)
 const accountForm = reactive({ id: null, name: '', platform: '', status: '正常' })
 
 const rules = {
-  platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
-  name: [{ required: true, message: '请输入账号名称', trigger: 'blur' }]
+  platform: [{ required: true, message: '请选择平台', trigger: 'change' }]
 }
 
 const sseConnecting = ref(false)
@@ -386,7 +373,32 @@ const handleReLogin = (row) => {
   qrCodeData.value = ''
   loginStatus.value = ''
   dialogVisible.value = true
-  setTimeout(() => connectSSE(row.platform, row.name), 300)
+  setTimeout(() => connectSSE(row.platform), 300)
+}
+
+const syncingIds = reactive(new Set())
+
+const handleSyncProfile = async (row) => {
+  if (syncingIds.has(row.id)) return
+  syncingIds.add(row.id)
+  try {
+    const res = await accountApi.syncProfile(row.id)
+    if (res.code === 200 && res.data) {
+      accountStore.updateAccount(row.id, {
+        id: row.id,
+        name: res.data.name || row.name,
+        avatar: res.data.avatar || row.avatar
+      })
+      ElMessage.success('资料同步成功')
+    } else {
+      ElMessage.error(res.msg || '同步失败')
+    }
+  } catch (error) {
+    console.error('同步资料失败:', error)
+    ElMessage.error('同步资料失败')
+  } finally {
+    syncingIds.delete(row.id)
+  }
 }
 
 const getDefaultAvatar = (name) => {
@@ -399,7 +411,7 @@ const closeSSEConnection = () => {
   if (eventSource) { eventSource.close(); eventSource = null }
 }
 
-const connectSSE = (platform, name) => {
+const connectSSE = (platform) => {
   closeSSEConnection()
   sseConnecting.value = true
   qrCodeData.value = ''
@@ -408,7 +420,9 @@ const connectSSE = (platform, name) => {
   const platformTypeMap = { '小红书': '1', '视频号': '2', '抖音': '3', '快手': '4' }
   const type = platformTypeMap[platform] || '1'
   const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5409'
-  const url = `${baseUrl}/login?type=${type}&id=${encodeURIComponent(name)}`
+  // 使用 UUID 作为临时标识，不再需要用户输入名称
+  const tempId = crypto.randomUUID()
+  const url = `${baseUrl}/login?type=${type}&id=${encodeURIComponent(tempId)}`
 
   eventSource = new EventSource(url)
 
@@ -418,22 +432,42 @@ const connectSSE = (platform, name) => {
       try {
         qrCodeData.value = data.startsWith('data:image') ? data : `data:image/png;base64,${data}`
       } catch (error) {}
-    } else if (data === '200' || data === '500') {
-      loginStatus.value = data
-      if (data === '200') {
-        setTimeout(() => {
-          closeSSEConnection()
+    } else if (data === '500') {
+      loginStatus.value = '500'
+      closeSSEConnection()
+      setTimeout(() => { sseConnecting.value = false; qrCodeData.value = ''; loginStatus.value = '' }, 2000)
+    } else {
+      // 尝试解析 JSON 响应（包含自动同步的名称和头像）
+      try {
+        const result = JSON.parse(data)
+        if (result.status === '200') {
+          loginStatus.value = '200'
           setTimeout(() => {
-            dialogVisible.value = false
-            sseConnecting.value = false
-            ElMessage.success(dialogType.value === 'edit' ? '重新登录成功' : '账号添加成功')
-            ElMessage({ type: 'info', message: '正在同步账号信息...', duration: 0 })
-            fetchAccounts().then(() => { ElMessage.closeAll(); ElMessage.success('账号信息已更新') })
+            closeSSEConnection()
+            setTimeout(() => {
+              dialogVisible.value = false
+              sseConnecting.value = false
+              ElMessage.success(dialogType.value === 'edit' ? '重新登录成功' : '账号添加成功')
+              ElMessage({ type: 'info', message: '正在同步账号信息...', duration: 0 })
+              fetchAccounts().then(() => { ElMessage.closeAll(); ElMessage.success('账号信息已更新') })
+            }, 1000)
           }, 1000)
-        }, 1000)
-      } else {
-        closeSSEConnection()
-        setTimeout(() => { sseConnecting.value = false; qrCodeData.value = ''; loginStatus.value = '' }, 2000)
+        }
+      } catch (e) {
+        // 兼容旧格式
+        if (data === '200') {
+          loginStatus.value = '200'
+          setTimeout(() => {
+            closeSSEConnection()
+            setTimeout(() => {
+              dialogVisible.value = false
+              sseConnecting.value = false
+              ElMessage.success(dialogType.value === 'edit' ? '重新登录成功' : '账号添加成功')
+              ElMessage({ type: 'info', message: '正在同步账号信息...', duration: 0 })
+              fetchAccounts().then(() => { ElMessage.closeAll(); ElMessage.success('账号信息已更新') })
+            }, 1000)
+          }, 1000)
+        }
       }
     }
   }
@@ -450,7 +484,7 @@ const submitAccountForm = () => {
   accountFormRef.value.validate(async (valid) => {
     if (valid) {
       if (dialogType.value === 'add') {
-        connectSSE(accountForm.platform, accountForm.name)
+        connectSSE(accountForm.platform)
       } else {
         try {
           const platformTypeMap = { '小红书': 1, '视频号': 2, '抖音': 3, '快手': 4 }

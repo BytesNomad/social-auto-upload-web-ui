@@ -25,5 +25,10 @@ export const accountApi = {
   // 删除账号
   deleteAccount(id) {
     return http.get(`/deleteAccount?id=${id}`)
+  },
+
+  // 同步账号资料（头像+昵称）
+  syncProfile(id) {
+    return http.post('/syncProfile', { id })
   }
 }
