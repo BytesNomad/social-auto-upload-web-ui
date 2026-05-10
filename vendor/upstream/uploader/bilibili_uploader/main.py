@@ -360,28 +360,59 @@ class BilibiliVideo(BilibiliBaseUploader):
             bilibili_logger.error(_msg("❌", f"封面文件不存在: {self.thumbnail_path}"))
             return
 
+        log_dir = Path(__file__).parent.parent.parent.parent / "data" / "logs"
         bilibili_logger.info(_msg("🖼️", "开始设置B站封面"))
 
         try:
-            # 根据用户提供的DOM，第一个是4:3（首页推荐封面），第二个是16:9（个人空间封面）
-            # 我们只用横版封面（16:9），对应 ratio_16_9
-            cover_selectors = [
-                ".cover-editor-panel-canvas-empty.ratio_16_9 input[type='file']",
-                ".ratio_16_9 input[type='file']",
-                "[class*='cover-editor-panel-canvas'] input[type='file']",
-                ".bcc-upload input[type='file']",
+            # 截图调试
+            await page.screenshot(path=str(log_dir / "bilibili_before_cover.png"), full_page=True)
+            bilibili_logger.info(_msg("📸", "封面设置前截图已保存"))
+
+            # 根据用户提供的DOM，点击封面区域会打开上传界面
+            # 先点击封面上传区域，激活文件选择
+            click_selectors = [
+                ".cover-editor-panel-canvas-empty.ratio_16_9 .empty-uploader-wrap",
+                ".ratio_16_9 .empty-uploader-wrap",
+                ".cover-editor-panel-canvas-empty .empty-uploader-wrap",
+                "[class*='empty-uploader-wrap']",
+            ]
+
+            click_target = None
+            for sel in click_selectors:
+                count = await page.locator(sel).count()
+                bilibili_logger.info(_msg("🔍", f"查找封面上传点击区域，使用选择器 '{sel}'，数量: {count}"))
+                if count > 0:
+                    click_target = page.locator(sel).first
+                    break
+
+            if not click_target:
+                bilibili_logger.error(_msg("❌", "未找到封面上传点击区域"))
+                return
+
+            bilibili_logger.info(_msg("🖱", "点击封面上传区域"))
+            await click_target.click()
+            await asyncio.sleep(1)
+
+            # 点击后截图，查看弹窗情况
+            await page.screenshot(path=str(log_dir / "bilibili_after_cover_click.png"), full_page=True)
+            bilibili_logger.info(_msg("📸", "点击后截图已保存"))
+
+            # 查找文件输入框（可能是隐藏的）
+            file_input_selectors = [
+                "input[type='file'][accept*='image']",
+                "input[type='file']",
             ]
 
             file_input = None
-            for sel in cover_selectors:
+            for sel in file_input_selectors:
                 count = await page.locator(sel).count()
-                bilibili_logger.info(_msg("🔍", f"查找封面上传 input，使用选择器 '{sel}'，数量: {count}"))
+                bilibili_logger.info(_msg("🔍", f"查找文件 input，使用选择器 '{sel}'，数量: {count}"))
                 if count > 0:
                     file_input = page.locator(sel).first
                     break
 
             if not file_input:
-                bilibili_logger.error(_msg("❌", "未找到封面上传 input"))
+                bilibili_logger.error(_msg("❌", "未找到文件 input"))
                 return
 
             await file_input.set_input_files(self.thumbnail_path)
