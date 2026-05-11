@@ -28,10 +28,10 @@
     "active": true,
     "targets": ["nsis"],
     "resources": {
-      "../python": "python",
-      "../backend": "backend",
-      "../vendor": "vendor",
-      "../frontend/dist": "frontend"
+      "python": "python",
+      "backend": "backend",
+      "vendor": "vendor",
+      "frontend": "frontend"
     },
     "icon": [
       "icons/32x32.png",
