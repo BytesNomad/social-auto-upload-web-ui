@@ -9,7 +9,7 @@ $TAURI_DIR = Join-Path $PROJECT_ROOT "src-tauri"
 $PYTHON_VERSION = "3.12.0"
 $PYTHON_URL = "https://www.python.org/ftp/python/$PYTHON_VERSION/python-3.12.0-embed-amd64.zip"
 $PYTHON_ZIP = Join-Path $env:TEMP "python-embed.zip"
-$PYTHON_DIR = Join-Path $TAURI_DIR "python"
+$PYTHON_DIR = Join-Path $PROJECT_ROOT "python"
 
 function Write-Step {
     param($msg)

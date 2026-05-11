@@ -30,6 +30,7 @@
     "resources": {
       "../python": "python",
       "../backend": "backend",
+      "../vendor": "vendor",
       "../frontend/dist": "frontend"
     },
     "icon": [
