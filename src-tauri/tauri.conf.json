@@ -27,6 +27,11 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "resources": {
+      "../python": "python",
+      "../backend": "backend",
+      "../frontend/dist": "frontend"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
