@@ -2,7 +2,7 @@
 # 包含: Python 运行环境 + Flask 后端 + 前端
 
 $ErrorActionPreference = "Stop"
-$PROJECT_ROOT = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$PROJECT_ROOT = Split-Path $PSScriptRoot -Parent
 $BACKEND_DIR = Join-Path $PROJECT_ROOT "backend"
 $FRONTEND_DIR = Join-Path $PROJECT_ROOT "frontend"
 $TAURI_DIR = Join-Path $PROJECT_ROOT "src-tauri"
