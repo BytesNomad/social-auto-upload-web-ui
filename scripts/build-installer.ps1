@@ -37,6 +37,16 @@ if (Test-Path $PYTHON_DIR) {
 }
 Copy-Item -Path $VENV_DIR -Destination $PYTHON_DIR -Recurse
 
+# 验证 Scripts/python.exe 存在
+$VENV_PYTHON_CHECK = Join-Path $PYTHON_DIR "Scripts" "python.exe"
+if (-not (Test-Path $VENV_PYTHON_CHECK)) {
+    Write-Host "[ERROR] venv copy failed! Scripts/python.exe not found at $VENV_PYTHON_CHECK" -ForegroundColor Red
+    Write-Host "This is NOT a venv! Check if backend/venv was created correctly." -ForegroundColor Red
+    Remove-Item $PYTHON_DIR -Recurse -Force -ErrorAction SilentlyContinue
+    exit 1
+}
+Write-Step "venv validated successfully!"
+
 # Step 4: 构建前端
 Write-Step "Building frontend..."
 Set-Location $FRONTEND_DIR
