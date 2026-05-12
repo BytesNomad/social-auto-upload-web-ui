@@ -365,7 +365,13 @@
                 clearable
                 class="cursor-pointer"
               >
-                <el-option label="暂无可选项" :value="''" disabled />
+                <el-option
+                  v-for="opt in (field.options || [])"
+                  :key="opt.value"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
+                <el-option v-if="!field.options || field.options.length === 0" label="暂无可选项" :value="''" disabled />
               </el-select>
 
               <!-- DateTime field -->
@@ -799,11 +805,11 @@ const cropSelectionStyle = computed(() => ({
 
 // ========== Per-platform Config ==========
 const platformConfigs = reactive({
-  douyin: { title: '', description: '', productTitle: '', productLink: '', aiContent: false, isOriginal: false, scheduleTime: '', visibility: 'public', allowDownload: true },
-  xiaohongshu: { title: '', description: '', collection: '', groupChat: '', location: '', isOriginal: false, scheduleTime: '' },
+  douyin: { title: '', description: '', productTitle: '', productLink: '', aiContent: '', isOriginal: false, scheduleTime: '', visibility: 'public', allowDownload: true },
+  xiaohongshu: { title: '', description: '', collection: '', groupChat: '', location: '', aiContent: '', isOriginal: false, scheduleTime: '' },
   kuaishou: { title: '', description: '', productTitle: '', productLink: '', aiContent: false, isOriginal: false, scheduleTime: '' },
-  bilibili: { title: '', description: '', zone: '', tags: '', topic: '', isOriginal: false, scheduleTime: '' },
-  channels: { title: '', description: '', isDraft: false, location: '', isOriginal: false },
+  bilibili: { title: '', description: '', zone: '', tags: '', topic: '', aiContent: '', isOriginal: false, scheduleTime: '' },
+  channels: { title: '', description: '', isDraft: false, location: '', aiContent: false, isOriginal: false },
 })
 
 const currentSettings = computed(() =>
@@ -1376,23 +1382,29 @@ async function publishAll() {
     publishProgress.value = Math.floor((i / allTasks.length) * 100)
 
     try {
+      // 解析平台自定义标签：支持 "#xx #xx" 和 "xx,xx" 两种格式
+      const customTags = (platformSettings.tags || '').split(/[,，\s]+/).map(t => t.replace(/^#/, '').trim()).filter(Boolean)
+      const allTags = [...commonConfig.topics, ...customTags]
+
       const publishData = {
         type: group.id,
         title: platformSettings.title,
         description: platformSettings.description || '',
-        tags: commonConfig.topics,
+        tags: allTags,
         fileList: commonConfig.fileList.map(f => f.path),
         accountList: [account.filePath],
         thumbnailLandscape: commonConfig.coverLandscape ? commonConfig.coverLandscape.path : '',
         thumbnailPortrait: commonConfig.coverPortrait ? commonConfig.coverPortrait.path : '',
         enableTimer: platformSettings.scheduleTime ? 1 : 0,
+        scheduleTime: platformSettings.scheduleTime || '',
         videosPerDay: 1,
         dailyTimes: ['10:00'],
         startDays: 0,
-        category: platformSettings.isOriginal ? 1 : 0,
+        category: platformSettings.zone || (platformSettings.isOriginal ? 1 : 0),
         productLink: platformSettings.productLink || '',
         productTitle: platformSettings.productTitle || '',
         isDraft: platformSettings.isDraft || false,
+        aiContent: platformSettings.aiContent || '',
       }
 
       await http.post('/postVideo', publishData)

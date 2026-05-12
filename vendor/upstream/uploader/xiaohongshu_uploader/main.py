@@ -461,15 +461,20 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         xiaohongshu_logger.info(_msg("📋", f"设置内容类型声明: {self.ai_content}"))
         try:
             # Step 1: 点击声明下拉框触发器
-            select_wrapper = page.locator('.custom-select-44 .d-select-wrapper').first
-            await select_wrapper.wait_for(state="visible", timeout=10000)
-            await select_wrapper.click()
-            xiaohongshu_logger.info(_msg("📋", "已点击声明下拉框"))
+            # placeholder 文字是"添加内容类型声明"，通过它定位
+            select_wrapper = page.locator('.d-select-placeholder:has-text("添加内容类型声明")').first
+            if await select_wrapper.count() > 0:
+                await select_wrapper.click()
+                xiaohongshu_logger.info(_msg("📋", "已点击声明下拉框"))
+            else:
+                # 兜底：点击声明区域的 select wrapper
+                await page.locator('.d-select-wrapper').first.click()
+                xiaohongshu_logger.info(_msg("📋", "已通过兜底选择器点击声明下拉框"))
             await asyncio.sleep(1)
 
             # Step 2: 在弹出的下拉列表中点击目标选项
             # 选项格式: <span class="d-text">虚构演绎，仅供娱乐</span>
-            target_option = page.locator(f'.d-option-name:has-text("{self.ai_content}")')
+            target_option = page.locator(f'.d-option .d-option-name:has-text("{self.ai_content}")')
             if await target_option.count() > 0:
                 await target_option.first.click()
                 xiaohongshu_logger.success(_msg("✅", f"已选择内容类型声明: {self.ai_content}"))

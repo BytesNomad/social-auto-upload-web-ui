@@ -430,19 +430,37 @@ class DouYinVideo(DouYinBaseUploader):
 
             # Step 2: 在弹窗中选择对应的 radio 选项
             # radio 选项格式: <span class="semi-radio-addon">内容由AI生成</span>
-            target_radio = page.locator(f'.semi-radio-addon:has-text("{self.ai_content}")')
+            target_radio = page.locator(f'.semi-radio-addon:text-is("{self.ai_content}")')
             if await target_radio.count() > 0:
                 await target_radio.first.click()
                 douyin_logger.info(_msg("📋", f"已选择声明选项: {self.ai_content}"))
                 await asyncio.sleep(1)
 
-                # Step 3: 点击确定按钮
-                confirm_btn = page.locator('.semi-modal-footer button.semi-button-primary, .btnWrapper-LtGF4z button:not(.semi-button-disabled)').last
+                # Step 3: 点击确定按钮（选中 radio 后按钮从 disabled 变为可点击）
+                # <button class="semi-button btn-xtdEbg">确定</button>
+                confirm_btn = page.locator('button.btn-xtdEbg:not(.semi-button-disabled)')
+                # 等待按钮变为可点击
+                for retry in range(10):
+                    if await confirm_btn.count() > 0:
+                        break
+                    await asyncio.sleep(0.5)
+
                 if await confirm_btn.count() > 0:
                     await confirm_btn.click()
                     douyin_logger.success(_msg("✅", "已确认自主声明"))
                 else:
-                    douyin_logger.warning(_msg("⚠️", "确定按钮不可用"))
+                    douyin_logger.warning(_msg("⚠️", "确定按钮仍为 disabled，尝试直接点击"))
+                    # 兜底：用JS移除disabled再点击
+                    await page.evaluate("""() => {
+                        const btns = document.querySelectorAll('.btnWrapper button');
+                        for (const btn of btns) {
+                            if (btn.textContent.trim() === '确定') {
+                                btn.disabled = false;
+                                btn.click();
+                            }
+                        }
+                    }""")
+                    douyin_logger.success(_msg("✅", "已通过JS确认自主声明"))
             else:
                 douyin_logger.warning(_msg("⚠️", f"未找到声明选项: {self.ai_content}"))
                 # 关闭弹窗
