@@ -467,13 +467,10 @@ def open_creator_center():
 
         def launch_browser():
             from patchright.sync_api import sync_playwright
-            from conf import LOCAL_CHROME_PATH
+            from myUtils.browser import create_browser_sync, create_context_sync
             pw = sync_playwright().start()
-            opts = {'headless': False}
-            if LOCAL_CHROME_PATH:
-                opts['executable_path'] = LOCAL_CHROME_PATH
-            browser = pw.chromium.launch(**opts)
-            context = browser.new_context(storage_state=cookie_path)
+            browser = create_browser_sync(pw, headless=False)
+            context = create_context_sync(browser, storage_state=cookie_path)
             page = context.new_page()
             page.goto(url)
             try:

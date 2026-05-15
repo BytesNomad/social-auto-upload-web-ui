@@ -17,7 +17,8 @@ from patchright.async_api import Page
 from patchright.async_api import Playwright
 from patchright.async_api import async_playwright
 
-from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS
+from myUtils.browser import create_browser, create_context, create_persistent_context
 from uploader.base_video import BaseVideoUploader
 from utils.log import youtube_logger
 
@@ -32,12 +33,9 @@ async def cookie_auth(account_file: str) -> bool:
     """校验 YouTube cookie 是否有效"""
     from conf import LOGIN_HEADLESS
     async with async_playwright() as playwright:
-        _opts = {'headless': LOGIN_HEADLESS}
-        if LOCAL_CHROME_PATH:
-            _opts['executable_path'] = LOCAL_CHROME_PATH
-        browser = await playwright.chromium.launch(**_opts)
+        browser = await create_browser(playwright, headless=LOGIN_HEADLESS)
         try:
-            context = await browser.new_context(storage_state=account_file)
+            context = await create_context(browser, storage_state=account_file)
             page = await context.new_page()
             await page.goto(YOUTUBE_STUDIO_URL)
             # 如果跳转到登录页面则 cookie 无效
@@ -63,14 +61,6 @@ async def youtube_cookie_gen(id, status_queue):
     import tempfile
     from conf import BASE_DIR
 
-    _args = [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-    ]
-    if LOCAL_CHROME_PATH:
-        _args.append(f'--executable-path={LOCAL_CHROME_PATH}')
-
     # 代理
     proxy_url = os.environ.get('HTTPS_PROXY') or os.environ.get('HTTP_PROXY') or 'http://127.0.0.1:7897'
 
@@ -82,11 +72,12 @@ async def youtube_cookie_gen(id, status_queue):
             # launch_persistent_context：patchright 有头模式下代理的唯一可靠方式
             # 注意：不加载 stealth.js，patchright 自身已有反检测能力
             tmp_dir = tempfile.mkdtemp(prefix="yt-login-")
-            context = await playwright.chromium.launch_persistent_context(
+            context = await create_persistent_context(
+                playwright,
                 user_data_dir=tmp_dir,
                 headless=False,
                 proxy={"server": proxy_url},
-                args=_args,
+                extra_args=_args,
             )
             page = context.pages[0] if context.pages else await context.new_page()
             print(f"[YOUTUBE DEBUG] Navigating to accounts.google.com...")
@@ -163,7 +154,6 @@ class YouTubeBaseUploader(BaseVideoUploader):
         self.account_file = str(account_file)
         self.debug = debug
         self.headless = headless
-        self.local_executable_path = LOCAL_CHROME_PATH
 
     async def validate_base_args(self):
         if not os.path.exists(self.account_file):
@@ -346,11 +336,8 @@ class YouTubeVideo(YouTubeBaseUploader):
         log_dir = Path(__file__).parent.parent.parent.parent / "data" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
 
-        _opts = {'headless': self.headless}
-        if self.local_executable_path:
-            _opts['executable_path'] = self.local_executable_path
-        browser = await playwright.chromium.launch(**_opts)
-        context = await browser.new_context(storage_state=self.account_file)
+        browser = await create_browser(playwright, headless=self.headless)
+        context = await create_context(browser, storage_state=self.account_file)
 
         upload_success = False
         try:
