@@ -240,11 +240,16 @@ export const PLATFORMS = {
     cssClass: 'youtube',
     creatorUrl: 'https://studio.youtube.com/',
     settingsFields: [
-      { key: 'isOriginal', label: '原创声明', type: 'radio', options: [{ label: '原创', value: true }, { label: '非原创', value: false }] },
-      { key: 'aiContent', label: 'AI生成内容', type: 'switch' },
-      { key: 'scheduleTime', label: '定时发布', type: 'datetime', placeholder: '选择时间' },
+      { key: 'audience', label: '观众', type: 'radio',
+        description: '根据法律要求，无论你身在何处，都必须遵守《儿童在线隐私保护法》(COPPA) 和/或其他法律。你必须指明自己的视频是否为面向儿童的内容。\n面向儿童的视频不支持个性化广告和通知等功能。',
+        options: [{ label: '是，内容是面向儿童的', value: 'kids' }, { label: '否，内容不是面向儿童的', value: 'not_kids' }] },
+      { key: 'alteredContent', label: '加工的内容', type: 'radio',
+        description: '你的内容是否符合以下任何一项描述？\n• 呈现真实人物的言论或行为，但实际并非本人言行\n• 篡改有关真实事件或地点的视频片段\n• 生成逼真但与实情不符的场景\n\n按照 YouTube 的政策，如果你的内容看似真实，但实则经过加工或合成，则必须告知我们。其中包括使用 AI 或其他工具制作的逼真声音或画面。如果选择"是"，系统会为内容加上披露声明。',
+        options: [{ label: '是', value: true }, { label: '否', value: false }] },
+      { key: 'scheduleTime', label: '定时发布', type: 'datetime', placeholder: '选择时间',
+        description: '选择要将你的视频设为公开的日期和时间。视频在发布之前将处于私享状态。时区默认为 GMT+8（香港）。' },
     ],
-    defaultSettings: { title: '', description: '', isOriginal: false, aiContent: false, scheduleTime: '' },
+    defaultSettings: { title: '', description: '', audience: 'not_kids', alteredContent: false, scheduleTime: '' },
   },
 }
 

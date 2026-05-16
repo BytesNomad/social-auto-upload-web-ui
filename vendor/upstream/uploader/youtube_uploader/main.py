@@ -5,6 +5,15 @@ YouTube Video Uploader
 基于 Patchright 浏览器自动化 + Cookie 认证的 YouTube 视频上传器
 
 上传地址: https://studio.youtube.com/channel/{channel_id}/videos/upload
+
+YouTube Studio 使用 Polymer Shadow DOM，所有输入框均为 contenteditable div，
+需要使用 Playwright locator 穿透 Shadow DOM 进行操作。
+
+上传流程（4个步骤）：
+  1. 详细信息 — 填写标题、描述、封面、观众（是否面向儿童）、展开高级设置（加工内容、标签）
+  2. 视频元素 — 直接跳过
+  3. 检查 — 直接跳过
+  4. 公开范围 — 选择公开或定时发布
 """
 from __future__ import annotations
 
@@ -226,6 +235,8 @@ class YouTubeVideo(YouTubeBaseUploader):
         desc: str | None = None,
         thumbnail_path=None,
         headless: bool = LOCAL_CHROME_HEADLESS,
+        audience: str = 'not_kids',  # 'kids' or 'not_kids'
+        altered_content: bool = False,  # 是否包含加工内容
     ):
         super().__init__(
             publish_date=publish_date,
@@ -244,6 +255,8 @@ class YouTubeVideo(YouTubeBaseUploader):
             self.tags = []
         self.desc = desc or ""
         self.thumbnail_path = thumbnail_path
+        self.audience = audience
+        self.altered_content = altered_content
 
     async def validate_upload_args(self):
         await self.validate_base_args()
@@ -253,126 +266,430 @@ class YouTubeVideo(YouTubeBaseUploader):
         if self.thumbnail_path:
             self.thumbnail_path = str(self.validate_image_file(self.thumbnail_path))
 
+    async def _open_upload_dialog(self, page: Page):
+        """在 YouTube Studio 首页点击上传按钮，打开上传对话框"""
+        youtube_logger.info(_msg("🖱️", "点击上传按钮"))
+
+        # 等待页面完全渲染（Polymer 组件需要时间）
+        await asyncio.sleep(5)
+
+        # 尝试多种方式找到上传按钮
+        upload_btn = page.locator('#upload-icon, [aria-label="上传视频"], ytcp-icon-button[aria-label="Upload videos"]').first
+        await upload_btn.wait_for(state="visible", timeout=20000)
+        youtube_logger.info(_msg("✅", "找到上传按钮，准备点击"))
+
+        # 强制点击（穿透 Shadow DOM）
+        await upload_btn.click(force=True)
+        youtube_logger.info(_msg("✅", "已点击上传按钮，等待对话框出现"))
+
+        # 等待上传对话框出现（确认文件选择器区域可见）
+        file_picker = page.locator('#select-files-button, ytcp-uploads-file-picker').first
+        await file_picker.wait_for(state="visible", timeout=15000)
+        youtube_logger.info(_msg("✅", "上传对话框已打开"))
+
     async def _upload_video_file(self, page: Page):
-        """上传视频文件到 YouTube"""
+        """在弹出的上传对话框中选择视频文件"""
         youtube_logger.info(_msg("📤", "正在上传视频文件"))
 
-        # YouTube Studio 上传界面的文件输入框
-        file_input = page.locator('input[type="file"][accept*="video"]').first
+        # 上传对话框内的文件 input
+        file_input = page.locator('input[name="Filedata"]').first
         await file_input.wait_for(state="attached", timeout=10000)
         await file_input.set_input_files(self.file_path)
-        youtube_logger.info(_msg("✅", "视频文件已选择，等待上传完成"))
+        youtube_logger.info(_msg("✅", "视频文件已选择，等待上传处理"))
 
     async def _wait_upload_complete(self, page: Page):
-        """等待视频上传完成"""
-        youtube_logger.info(_msg("⏳", "等待视频上传完成"))
+        """等待视频上传完成，直到详细信息表单和封面组件出现"""
+        youtube_logger.info(_msg("⏳", "等待视频上传完成..."))
+
+        # 等待标题输入框出现（contenteditable div）— 说明上传完成进入编辑界面
+        title_box = page.locator('#title-textarea #textbox').first
+        await title_box.wait_for(state="visible", timeout=300000)  # 最多等5分钟
+        youtube_logger.success(_msg("✅", "标题输入框已出现"))
+
+        # 等待封面上传组件出现 — 确保页面完全加载
         try:
-            # 等待上传进度条消失 - YouTube Studio 上传完成后会隐藏进度条
-            # 使用进度条容器作为目标，上传完成时该元素会被移除或改变
-            progress_selector = 'tp-yt-paper-progress, [progress-bar], .upload-progress'
-            try:
-                await page.wait_for_selector(progress_selector, state="hidden", timeout=120000)
-                youtube_logger.info(_msg("✅", "视频文件上传完成"))
-            except Exception:
-                # 备用方案：等待 "视频已上传" 相关元素出现
-                youtube_logger.info(_msg("⏳", "使用备用方案检测上传状态"))
-                await asyncio.sleep(5)
+            thumbnail_input = page.locator('ytcp-thumbnail-uploader input#file-loader').first
+            await thumbnail_input.wait_for(state="attached", timeout=60000)
+            youtube_logger.success(_msg("✅", "封面上传组件已就绪"))
+        except Exception:
+            youtube_logger.warning(_msg("⚠️", "封面上传组件未出现，继续执行"))
 
-            # 检查是否有上传失败的提示
-            fail_text = page.locator("text=上传失败")
-            if await fail_text.count() > 0:
-                youtube_logger.warning(_msg("⚠️", "视频上传失败"))
-                return False
+        youtube_logger.success(_msg("✅", "视频上传完成，编辑界面已加载"))
 
-            # 等待下一步操作界面出现（通常是标题输入框）
-            title_input = page.locator(
-                'input[placeholder*="title"], input[placeholder*="标题"], '
-                '#title-input, [class*="title"] input'
-            ).first
-            try:
-                await title_input.wait_for(state="visible", timeout=30000)
-                youtube_logger.success(_msg("✅", "上传界面已加载"))
-            except Exception:
-                youtube_logger.warning(_msg("⚠️", "未检测到上传完成界面"))
-
-            return True
-        except Exception as exc:
-            youtube_logger.warning(_msg("⚠️", f"检查上传状态出错: {exc}"))
+        # 检查是否有上传失败的提示
+        fail_text = page.locator("text=上传失败")
+        if await fail_text.count() > 0:
+            youtube_logger.error(_msg("❌", "视频上传失败"))
             return False
 
+        return True
+
+    async def _clear_and_type_contenteditable(self, page: Page, selector: str, text: str):
+        """向 contenteditable div 输入文本"""
+        el = page.locator(selector).first
+        await el.wait_for(state="visible", timeout=10000)
+        await el.click()
+        await asyncio.sleep(0.3)
+        # 全选清空
+        await page.keyboard.press("Control+a")
+        await page.keyboard.press("Backspace")
+        await asyncio.sleep(0.2)
+        # 输入新文本
+        await el.press_sequentially(text, delay=30)
+
     async def _fill_title(self, page: Page):
-        """填写视频标题"""
+        """填写视频标题（contenteditable div）"""
         youtube_logger.info(_msg("✍️", f"填写标题: {self.title[:30]}"))
-        title_input = page.locator(
-            'input[placeholder*="title"], input[placeholder*="标题"], '
-            '#title-input, [class*="title"] input'
-        ).first
-        await title_input.wait_for(state="visible", timeout=15000)
-        await title_input.click()
-        await title_input.fill("")
-        await title_input.fill(self.title[:100])
+        await self._clear_and_type_contenteditable(page, '#title-textarea #textbox', self.title[:100])
 
     async def _fill_desc(self, page: Page):
-        """填写视频描述"""
+        """填写视频描述（contenteditable div）"""
         if not self.desc:
             return
-
         youtube_logger.info(_msg("📝", "填写视频描述"))
-        desc_input = page.locator(
-            'textarea[placeholder*="描述"], textarea[placeholder*="desc"], '
-            '#description-input, [class*="description"] textarea'
-        ).first
-        if await desc_input.count() > 0 and await desc_input.is_visible():
-            await desc_input.click()
-            await desc_input.fill(self.desc)
-        else:
-            youtube_logger.warning(_msg("⚠️", "未找到描述输入框"))
-
-    async def _fill_tags(self, page: Page):
-        """填写视频标签"""
-        if not self.tags:
-            return
-
-        youtube_logger.info(_msg("🏷️", f"添加 {len(self.tags)} 个标签"))
-        # YouTube Studio 标签输入框
-        tag_input = page.locator(
-            'input[placeholder*="标签"], input[placeholder*="tag"], '
-            '#tag-input, [class*="tag"] input'
-        ).first
-        for tag in self.tags[:15]:
-            try:
-                await tag_input.click()
-                await asyncio.sleep(0.3)
-                await tag_input.press_sequentially(str(tag), delay=50)
-                await asyncio.sleep(0.3)
-                await tag_input.press("Enter")
-                await asyncio.sleep(0.5)
-                youtube_logger.info(_msg("🏷️", f"已添加标签: {tag}"))
-            except Exception as exc:
-                youtube_logger.warning(_msg("⚠️", f"添加标签失败 '{tag}': {exc}"))
+        await self._clear_and_type_contenteditable(page, '#description-textarea #textbox', self.desc)
 
     async def _set_thumbnail(self, page: Page):
         """上传视频封面"""
         if not self.thumbnail_path:
             return
-
         if not os.path.exists(self.thumbnail_path):
             youtube_logger.error(_msg("❌", f"封面文件不存在: {self.thumbnail_path}"))
             return
 
         youtube_logger.info(_msg("🖼️", "开始设置 YouTube 封面"))
         try:
-            # 查找封面上传区域并点击
-            thumb_area = page.locator(
-                '#upload-thumbnail, [class*="thumbnail"] input[type="file"]'
-            ).first
-            if await thumb_area.count() > 0:
-                await thumb_area.set_input_files(self.thumbnail_path)
-                youtube_logger.success(_msg("✅", "封面已上传"))
-            else:
-                youtube_logger.warning(_msg("⚠️", "未找到封面上传区域"))
+            # 封面上传的隐藏 file input（id="file-loader"）
+            file_input = page.locator('ytcp-thumbnail-uploader input#file-loader').first
+            await file_input.wait_for(state="attached", timeout=10000)
+            await file_input.set_input_files(self.thumbnail_path)
+            youtube_logger.success(_msg("✅", "封面已上传"))
+            # 等待封面上传完成
+            await asyncio.sleep(3)
         except Exception as exc:
             youtube_logger.warning(_msg("⚠️", f"封面设置失败: {exc}"))
+
+    async def _set_audience(self, page: Page):
+        """设置观众（是否面向儿童）"""
+        youtube_logger.info(_msg("👥", f"设置观众: {'面向儿童' if self.audience == 'kids' else '不是面向儿童'}"))
+        try:
+            if self.audience == 'kids':
+                radio = page.locator('tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_MFK"]').first
+            else:
+                radio = page.locator('tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_NOT_MFK"]').first
+
+            await radio.wait_for(state="visible", timeout=10000)
+            # 检查是否已经选中
+            is_checked = await radio.get_attribute("aria-checked")
+            if is_checked == "true":
+                youtube_logger.info(_msg("✅", "观众设置已是目标值，跳过"))
+                return
+            # force=True 穿透 Shadow DOM 点击
+            await radio.click(force=True)
+            await asyncio.sleep(1)
+            # 验证是否选中成功
+            is_checked_after = await radio.get_attribute("aria-checked")
+            if is_checked_after == "true":
+                youtube_logger.success(_msg("✅", "观众设置完成"))
+            else:
+                youtube_logger.warning(_msg("⚠️", "观众设置可能未生效，再次点击"))
+                await radio.click(force=True)
+                await asyncio.sleep(0.5)
+                youtube_logger.success(_msg("✅", "观众设置重试完成"))
+        except Exception as exc:
+            youtube_logger.warning(_msg("⚠️", f"观众设置失败: {exc}"))
+
+    async def _expand_advanced_settings(self, page: Page):
+        """展开高级设置"""
+        youtube_logger.info(_msg("⚙️", "展开高级设置"))
+        try:
+            # 找到"展开"按钮（toggle-button 的 aria-label 为 "显示高级设置"）
+            toggle_btn = page.locator('#toggle-button').first
+            await toggle_btn.wait_for(state="visible", timeout=10000)
+
+            # 检查是否已经展开（如果按钮 aria-label 包含 "隐藏" 则已展开）
+            aria_label = await toggle_btn.get_attribute("aria-label") or ""
+            if "隐藏" not in aria_label and "Collapse" not in aria_label:
+                await toggle_btn.click(force=True)
+                await asyncio.sleep(2)
+                youtube_logger.info(_msg("✅", "高级设置已展开"))
+            else:
+                youtube_logger.info(_msg("✅", "高级设置已处于展开状态"))
+        except Exception as exc:
+            youtube_logger.warning(_msg("⚠️", f"展开高级设置失败: {exc}"))
+
+    async def _set_altered_content(self, page: Page):
+        """设置加工内容声明"""
+        youtube_logger.info(_msg("🔧", f"设置加工内容: {'是' if self.altered_content else '否'}"))
+        try:
+            if self.altered_content:
+                radio = page.locator('tp-yt-paper-radio-button[name="VIDEO_HAS_ALTERED_CONTENT_YES"]').first
+            else:
+                radio = page.locator('tp-yt-paper-radio-button[name="VIDEO_HAS_ALTERED_CONTENT_NO"]').first
+
+            await radio.wait_for(state="visible", timeout=10000)
+            is_checked = await radio.get_attribute("aria-checked")
+            if is_checked == "true":
+                youtube_logger.info(_msg("✅", "加工内容已是目标值，跳过"))
+                return
+            # force=True 穿透 Shadow DOM
+            await radio.click(force=True)
+            await asyncio.sleep(1)
+            # 验证
+            is_checked_after = await radio.get_attribute("aria-checked")
+            if is_checked_after == "true":
+                youtube_logger.success(_msg("✅", "加工内容设置完成"))
+            else:
+                youtube_logger.warning(_msg("⚠️", "加工内容可能未生效，再次点击"))
+                await radio.click(force=True)
+                await asyncio.sleep(0.5)
+                youtube_logger.success(_msg("✅", "加工内容重试完成"))
+        except Exception as exc:
+            youtube_logger.warning(_msg("⚠️", f"加工内容设置失败: {exc}"))
+
+    async def _fill_tags(self, page: Page):
+        """填写视频标签（在高级设置的标签输入框中）"""
+        if not self.tags:
+            return
+
+        youtube_logger.info(_msg("🏷️", f"添加 {len(self.tags)} 个标签"))
+        try:
+            tag_input = page.locator('#tags-container input#text-input').first
+            await tag_input.wait_for(state="visible", timeout=10000)
+
+            for tag in self.tags[:15]:
+                try:
+                    await tag_input.click()
+                    await asyncio.sleep(0.2)
+                    await tag_input.press_sequentially(str(tag), delay=30)
+                    await asyncio.sleep(0.3)
+                    await tag_input.press("Enter")
+                    await asyncio.sleep(0.3)
+                    youtube_logger.info(_msg("🏷️", f"已添加标签: {tag}"))
+                except Exception as exc:
+                    youtube_logger.warning(_msg("⚠️", f"添加标签失败 '{tag}': {exc}"))
+        except Exception as exc:
+            youtube_logger.warning(_msg("⚠️", f"标签输入框未找到: {exc}"))
+
+    async def _click_next(self, page: Page):
+        """点击"继续"按钮"""
+        next_btn = page.locator('#next-button').first
+        await next_btn.wait_for(state="visible", timeout=10000)
+        await next_btn.click()
+        await asyncio.sleep(2)
+
+    async def _click_public_radio(self, page: Page):
+        """点击 PUBLIC radio button（无论是否定时，都需要先选中公开）"""
+        youtube_logger.info(_msg("🖱️", "开始点击 PUBLIC radio"))
+
+        # 等待 radio group 出现
+        privacy_radios = page.locator('#privacy-radios').first
+        await privacy_radios.wait_for(state="visible", timeout=15000)
+        youtube_logger.info(_msg("📋", "privacy-radios 已可见"))
+
+        # 定位 PUBLIC radio
+        public_radio = page.locator('tp-yt-paper-radio-button[name="PUBLIC"]').first
+        await public_radio.wait_for(state="visible", timeout=10000)
+
+        # 检查是否已选中
+        is_checked = await public_radio.get_attribute("aria-checked")
+        youtube_logger.info(_msg("📋", f"PUBLIC radio aria-checked={is_checked}"))
+        if is_checked == "true":
+            youtube_logger.info(_msg("✅", "公开已是选中状态"))
+            return
+
+        # 先滚动到元素可见
+        await public_radio.scroll_into_view_if_needed()
+        await asyncio.sleep(0.5)
+
+        # 方法1: evaluate 直接触发 DOM click
+        youtube_logger.info(_msg("🖱️", "方法1: evaluate click"))
+        await public_radio.evaluate('el => el.click()')
+        await asyncio.sleep(1.5)
+
+        is_checked_after = await public_radio.get_attribute("aria-checked")
+        youtube_logger.info(_msg("📋", f"evaluate 后 aria-checked={is_checked_after}"))
+        if is_checked_after == "true":
+            youtube_logger.success(_msg("✅", "已选择公开（evaluate）"))
+            return
+
+        # 方法2: Playwright click + force
+        youtube_logger.info(_msg("🖱️", "方法2: playwright force click"))
+        await public_radio.click(force=True)
+        await asyncio.sleep(1.5)
+
+        is_checked_after = await public_radio.get_attribute("aria-checked")
+        youtube_logger.info(_msg("📋", f"force click 后 aria-checked={is_checked_after}"))
+        if is_checked_after == "true":
+            youtube_logger.success(_msg("✅", "已选择公开（force click）"))
+            return
+
+        # 方法3: 点击 radioContainer 内的 offRadio 圆圈
+        youtube_logger.info(_msg("🖱️", "方法3: 点击 offRadio"))
+        try:
+            off_radio = public_radio.locator('#offRadio').first
+            await off_radio.click(force=True)
+            await asyncio.sleep(1)
+            is_checked_after = await public_radio.get_attribute("aria-checked")
+            if is_checked_after == "true":
+                youtube_logger.success(_msg("✅", "已选择公开（offRadio）"))
+                return
+        except Exception as e:
+            youtube_logger.warning(_msg("⚠️", f"offRadio click 失败: {e}"))
+
+        # 方法4: 用 page.evaluate 全局查找并点击
+        youtube_logger.info(_msg("🖱️", "方法4: page.evaluate 全局查找"))
+        try:
+            result = await page.evaluate('''() => {
+                const radios = document.querySelectorAll('tp-yt-paper-radio-button[name="PUBLIC"]');
+                if (radios.length > 0) {
+                    radios[0].click();
+                    return radios[0].getAttribute('aria-checked');
+                }
+                return 'not_found';
+            }''')
+            youtube_logger.info(_msg("📋", f"全局 evaluate 后 aria-checked={result}"))
+        except Exception as e:
+            youtube_logger.warning(_msg("⚠️", f"全局 evaluate 失败: {e}"))
+
+        youtube_logger.success(_msg("✅", "公开 radio 点击流程结束"))
+
+    async def _set_visibility(self, page: Page):
+        """设置公开范围 — 先选公开，再按需设置定时"""
+        # 等待公开范围步骤加载
+        await asyncio.sleep(2)
+
+        # 无论是否定时，都需要先选中"公开"
+        await self._click_public_radio(page)
+
+        is_scheduled = self.publish_date != 0 and self.publish_date is not None
+        if is_scheduled:
+            youtube_logger.info(_msg("📅", "设置定时发布"))
+            await self._set_scheduled_publish(page)
+
+    async def _set_public_publish(self, page: Page):
+        """选择公开发布 — 已在 _set_visibility 中通过 _click_public_radio 处理"""
+        pass
+
+    async def _set_scheduled_publish(self, page: Page):
+        """设置定时发布 — 日期直接输入、时间直接输入、时区下拉选择"""
+        try:
+            # 等待公开范围步骤加载
+            await asyncio.sleep(2)
+
+            # 准备日期/时间字符串
+            if isinstance(self.publish_date, datetime):
+                date_str = f"{self.publish_date.year}年{self.publish_date.month}月{self.publish_date.day}日"
+                time_str = f"{self.publish_date.hour:02d}:{self.publish_date.minute:02d}"
+            else:
+                dt = datetime.fromtimestamp(int(self.publish_date))
+                date_str = f"{dt.year}年{dt.month}月{dt.day}日"
+                time_str = f"{dt.hour:02d}:{dt.minute:02d}"
+
+            youtube_logger.info(_msg("📅", f"计划定时发布: {date_str} {time_str}"))
+
+            # 1. 点击 second-container 展开"安排时间"选项
+            second_container = page.locator('#second-container').first
+            await second_container.wait_for(state="visible", timeout=10000)
+            await second_container.click(force=True)
+            await asyncio.sleep(1)
+
+            # 尝试展开定时发布的详细信息
+            expand_btn = page.locator('#second-container-expand-button').first
+            try:
+                if await expand_btn.is_visible():
+                    await expand_btn.click(force=True)
+                    await asyncio.sleep(1)
+            except Exception:
+                pass
+
+            # 2. 设置日期 — 点击 datepicker-trigger 展开日期选择器，然后直接在输入框中输入日期
+            youtube_logger.info(_msg("📅", f"设置日期: {date_str}"))
+            date_trigger = page.locator('#datepicker-trigger').first
+            await date_trigger.wait_for(state="visible", timeout=10000)
+
+            # 点击展开日期选择器
+            await date_trigger.click(force=True)
+            await asyncio.sleep(1)
+
+            # 找到日期输入框（在 datepicker 弹窗内的 tp-yt-iron-input input）
+            date_input = page.locator(
+                '#datepicker-trigger tp-yt-iron-input input, '
+                'tp-yt-paper-dialog.ytcp-datepicker tp-yt-iron-input input'
+            ).first
+
+            try:
+                await date_input.wait_for(state="visible", timeout=5000)
+                await date_input.click()
+                await asyncio.sleep(0.3)
+                # 全选并输入新日期
+                await page.keyboard.press("Control+a")
+                await asyncio.sleep(0.1)
+                await date_input.press_sequentially(date_str, delay=30)
+                await asyncio.sleep(0.3)
+                await page.keyboard.press("Enter")
+                await asyncio.sleep(1)
+                youtube_logger.success(_msg("✅", f"日期已输入: {date_str}"))
+            except Exception as exc:
+                # 备选方案：直接操作 datepicker trigger 内部的文本
+                youtube_logger.warning(_msg("⚠️", f"日期输入框未找到，尝试备选方案: {exc}"))
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.5)
+                # 点击 trigger 的下拉文本
+                dropdown_text = date_trigger.locator('.dropdown-trigger-text').first
+                await dropdown_text.click(force=True)
+                await asyncio.sleep(0.3)
+                await page.keyboard.press("Control+a")
+                await asyncio.sleep(0.1)
+                await dropdown_text.press_sequentially(date_str, delay=30)
+                await asyncio.sleep(0.3)
+                await page.keyboard.press("Enter")
+                await asyncio.sleep(1)
+
+            # 3. 设置时间 — 在 time-of-day-container 的输入框中直接输入
+            youtube_logger.info(_msg("⏰", f"设置时间: {time_str}"))
+            time_input = page.locator(
+                '#time-of-day-container tp-yt-iron-input input, '
+                '#time-of-day-container input'
+            ).first
+            await time_input.wait_for(state="visible", timeout=10000)
+            await time_input.click()
+            await asyncio.sleep(0.3)
+            await page.keyboard.press("Control+a")
+            await asyncio.sleep(0.1)
+            await time_input.press_sequentially(time_str, delay=30)
+            await asyncio.sleep(0.3)
+            await page.keyboard.press("Enter")
+            await asyncio.sleep(0.5)
+            youtube_logger.success(_msg("✅", f"时间已输入: {time_str}"))
+
+            # 4. 设置时区 — 点击时区按钮，从下拉列表选择 GMT+8 香港
+            youtube_logger.info(_msg("🌐", "设置时区 GMT+8（香港）"))
+            timezone_btn = page.locator('button[aria-label="时区"], #timezone-select-button').first
+            try:
+                await timezone_btn.wait_for(state="visible", timeout=5000)
+                await timezone_btn.click(force=True)
+                await asyncio.sleep(1)
+
+                # 在时区下拉列表中选择 "(GMT+08:00) 香港"
+                tz_option = page.locator('tp-yt-paper-item:has-text("（GMT+08:00）香港"), '
+                                         'tp-yt-paper-item:has-text("(GMT+08:00) Hong Kong"), '
+                                         'tp-yt-paper-item:has-text("GMT+08:00")').first
+                await tz_option.wait_for(state="visible", timeout=5000)
+                await tz_option.click()
+                youtube_logger.success(_msg("✅", "时区已设置为 GMT+8（香港）"))
+            except Exception as exc:
+                youtube_logger.warning(_msg("⚠️", f"时区设置失败，使用默认时区: {exc}"))
+                try:
+                    await page.keyboard.press("Escape")
+                except Exception:
+                    pass
+
+            await asyncio.sleep(1)
+            youtube_logger.success(_msg("✅", "定时发布设置完成"))
+
+        except Exception as exc:
+            youtube_logger.warning(_msg("⚠️", f"设置定时发布失败: {exc}"))
 
     async def upload(self, playwright: Playwright) -> None:
         youtube_logger.info(_msg("🔍", "上传前检查 cookie、视频文件和发布时间"))
@@ -389,84 +706,79 @@ class YouTubeVideo(YouTubeBaseUploader):
         try:
             page = await context.new_page()
             youtube_logger.info(_msg("🎬", f"开始上传视频: {self.title}"))
-            # YouTube Studio 上传页面
-            await page.goto(YOUTUBE_STUDIO_URL + "/channel/me/videos/upload")
-            youtube_logger.info(_msg("🧭", "正在等待 YouTube Studio 上传页面加载"))
-            await page.wait_for_url("**/videos/upload**", timeout=30000)
+            # YouTube Studio 首页（不用 networkidle，YouTube Studio 有持续网络请求永远达不到）
+            await page.goto(YOUTUBE_STUDIO_URL, wait_until='domcontentloaded', timeout=30000)
+            youtube_logger.info(_msg("🧭", "YouTube Studio 页面已开始加载，等待渲染..."))
+            await asyncio.sleep(5)
 
-            # 1. 上传视频文件
+            # Step 1: 点击上传按钮，打开上传对话框
+            await self._open_upload_dialog(page)
+
+            # Step 2: 上传视频文件
             await self._upload_video_file(page)
 
-            # 2. 等待上传完成
+            # Step 3: 等待上传完成
             upload_ok = await self._wait_upload_complete(page)
             if not upload_ok:
-                youtube_logger.error(_msg("❌", "视频上传失败"))
-                return
+                raise RuntimeError("视频上传失败")
 
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
 
-            # 3. 填写标题
+            # Step 4: 填写详细信息
             await self._fill_title(page)
-
-            # 4. 填写描述
             await self._fill_desc(page)
+            await self._set_thumbnail(page)
+            await self._set_audience(page)
 
-            # 5. 填写标签
+            # Step 5: 展开高级设置
+            await self._expand_advanced_settings(page)
+
+            # Step 6: 设置加工内容
+            await self._set_altered_content(page)
+
+            # Step 7: 填写标签
             await self._fill_tags(page)
 
-            # 6. 设置封面
-            await self._set_thumbnail(page)
+            # Step 8: 点击"继续" → 视频元素步骤
+            youtube_logger.info(_msg("➡️", "点击继续 → 视频元素"))
+            await self._click_next(page)
 
-            # 7. 提交
-            youtube_logger.info(_msg("📤", "正在提交视频"))
+            # Step 9: 点击"继续" → 检查步骤
+            youtube_logger.info(_msg("➡️", "点击继续 → 检查"))
+            await self._click_next(page)
 
-            # 查找并点击 "发布" 按钮
-            # YouTube Studio 的发布按钮可能是多种选择器
-            submit_button = page.locator(
-                '#publish-button, tp-yt-paper-button[aria-label*="发布"], '
-                '[aria-label*="publish"] button, #upload- publish-button, '
-                'tp-yt-paper-button:has-text("发布"), button:has-text("发布")'
-            ).first
+            # Step 10: 点击"继续" → 公开范围步骤
+            youtube_logger.info(_msg("➡️", "点击继续 → 公开范围"))
+            await self._click_next(page)
 
+            # Step 11: 设置公开范围
+            await self._set_visibility(page)
+
+            await asyncio.sleep(1)
+
+            # Step 12: 点击"保存"完成发布
+            youtube_logger.info(_msg("📤", "点击保存完成发布"))
+            done_btn = page.locator('#done-button').first
+            await done_btn.wait_for(state="visible", timeout=10000)
+            await done_btn.click()
+            youtube_logger.info(_msg("⏳", "等待发布处理..."))
+
+            await asyncio.sleep(5)
+
+            upload_success = True
+            youtube_logger.success(_msg("✅", "视频发布成功"))
+
+        except Exception as exc:
+            upload_success = False
+            youtube_logger.error(_msg("❌", f"上传过程出错: {exc}"))
+            # 尝试截图保存错误现场
             try:
-                await submit_button.wait_for(state="visible", timeout=15000)
-                youtube_logger.info(_msg("👆", "找到发布按钮，准备点击"))
-                await submit_button.click()
-                youtube_logger.info(_msg("⏳", "等待发布处理"))
-
-                # 等待发布完成 - 通常会显示 "视频已发布" 或类似的成功提示
-                await asyncio.sleep(3)
-
-                # 检查是否有发布成功的提示
-                success_indicators = page.locator(
-                    'text=已发布, text=发布成功, text=Video published, '
-                    '[aria-label*="已发布"]'
-                )
-                if await success_indicators.count() > 0:
-                    youtube_logger.success(_msg("✅", "视频发布成功"))
-                    upload_success = True
-                else:
-                    # 如果没有明确成功提示，检查是否还在编辑页面
-                    if await submit_button.is_visible():
-                        youtube_logger.warning(_msg("⚠️", "发布按钮仍可见，可能发布未完成"))
-                        upload_success = True  # 仍标记为成功，因为点击了按钮
-                    else:
-                        youtube_logger.info(_msg("📤", "发布流程已触发"))
-                        upload_success = True
-            except Exception as exc:
-                youtube_logger.warning(_msg("⚠️", f"点击发布按钮失败: {exc}"))
-                # 尝试备用方案：查找可能的 "下一步" 或 "完成" 按钮
-                try:
-                    next_button = page.locator(
-                        'button:has-text("下一步"), button:has-text("下一步"), '
-                        'tp-yt-paper-button:has-text("下一步")'
-                    ).first
-                    if await next_button.is_visible():
-                        await next_button.click()
-                        youtube_logger.info(_msg("👆", "点击了下一步按钮"))
-                        upload_success = True
-                except Exception:
-                    pass
+                screenshot_path = log_dir / f"youtube_error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                await page.screenshot(path=str(screenshot_path))
+                youtube_logger.info(_msg("📸", f"错误截图已保存: {screenshot_path}"))
+            except Exception:
+                pass
+            raise RuntimeError(f"YouTube 上传失败: {exc}")
         finally:
             if upload_success:
                 try:

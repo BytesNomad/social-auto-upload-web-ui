@@ -234,7 +234,8 @@ def post_video_tiktok(title, files, tags, account_file,
 
 def post_video_youtube(title, files, tags, account_file,
                        enableTimer=False, videos_per_day=1, daily_times=None,
-                       start_days=0, thumbnail_path=None, desc='', schedule_time_str=''):
+                       start_days=0, thumbnail_path=None, desc='', schedule_time_str='',
+                       audience='not_kids', altered_content=False):
     """YouTube视频上传"""
     from uploader.youtube_uploader.main import YouTubeVideo
 
@@ -259,5 +260,7 @@ def post_video_youtube(title, files, tags, account_file,
                 desc=desc or None,
                 thumbnail_path=thumbnail_path,
                 headless=False,
+                audience=audience,
+                altered_content=altered_content,
             )
             asyncio.run(app.main(), debug=False)

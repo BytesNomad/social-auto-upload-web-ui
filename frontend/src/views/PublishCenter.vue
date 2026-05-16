@@ -320,6 +320,7 @@
               }"
             >
               <div class="setting-label" :style="{ color: currentPlatformConfig.color }">{{ field.label }}</div>
+              <div v-if="field.description" class="setting-desc">{{ field.description }}</div>
 
               <!-- Input field -->
               <el-input
@@ -813,7 +814,7 @@ const platformConfigs = reactive({
   channels: { title: '', description: '', isDraft: false, location: '', aiContent: false, isOriginal: false },
   baijiahao: { title: '', description: '', aiContent: false, isOriginal: false },
   tiktok: { title: '', description: '', aiContent: false, isOriginal: false, scheduleTime: '' },
-  youtube: { title: '', description: '', isOriginal: false, aiContent: false, scheduleTime: '' },
+  youtube: { title: '', description: '', audience: 'not_kids', alteredContent: false, scheduleTime: '' },
 })
 
 const currentSettings = computed(() =>
@@ -1410,6 +1411,8 @@ async function publishAll() {
         isDraft: platformSettings.isDraft || false,
         aiContent: platformSettings.aiContent || '',
         creationDeclaration: platformSettings.creationDeclaration || '',
+        audience: platformSettings.audience || 'not_kids',
+        alteredContent: platformSettings.alteredContent || false,
       }
 
       await http.post('/postVideo', publishData)
@@ -2334,6 +2337,13 @@ function formatSize(bytes) {
   .setting-label {
     font-size: 13px;
     font-weight: 600;
+  }
+
+  .setting-desc {
+    font-size: 12px;
+    color: $text-secondary;
+    line-height: 1.6;
+    white-space: pre-line;
   }
 
   :deep(.el-input__wrapper),

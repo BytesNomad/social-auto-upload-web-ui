@@ -619,8 +619,12 @@ def postVideo():
                 post_video_tiktok(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
                           start_days, schedule_time_str=schedule_time_str)
             case 8:
-                post_video_youtube(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
-                          start_days, schedule_time_str=schedule_time_str)
+                post_video_youtube(title, file_list, tags, account_list,
+                          enableTimer=enableTimer, videos_per_day=videos_per_day, daily_times=daily_times,
+                          start_days=start_days, schedule_time_str=schedule_time_str,
+                          audience=data.get('audience', 'not_kids'),
+                          altered_content=data.get('alteredContent', False),
+                          desc=desc, thumbnail_path=thumbnail_landscape_path or thumbnail_path)
             case _:
                 return jsonify({"code": 400, "msg": f"不支持的平台类型: {type}", "data": None}), 400
 
@@ -736,8 +740,12 @@ def postVideoBatch():
                 post_video_tiktok(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
                           start_days, schedule_time_str=schedule_time_str)
             case 8:
-                post_video_youtube(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
-                          start_days, schedule_time_str=schedule_time_str)
+                post_video_youtube(title, file_list, tags, account_list,
+                          enableTimer=enableTimer, videos_per_day=videos_per_day, daily_times=daily_times,
+                          start_days=start_days, schedule_time_str=schedule_time_str,
+                          audience=data.get('audience', 'not_kids'),
+                          altered_content=data.get('alteredContent', False),
+                          desc=desc, thumbnail_path=thumbnail_landscape_path or thumbnail_path)
     # 返回响应给客户端
     return jsonify(
         {
