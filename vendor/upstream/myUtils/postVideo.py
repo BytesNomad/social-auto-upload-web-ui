@@ -3,10 +3,10 @@ from datetime import datetime
 from pathlib import Path
 
 from conf import BASE_DIR
-from uploader.douyin_uploader.main import DouYinVideo
+from uploader.douyin_uploader.main import DouYinVideo, DOUYIN_PUBLISH_STRATEGY_SCHEDULED, DOUYIN_PUBLISH_STRATEGY_IMMEDIATE
 from uploader.ks_uploader.main import KSVideo
 from uploader.tencent_uploader.main import TencentVideo
-from uploader.xiaohongshu_uploader.main import XiaoHongShuVideo
+from uploader.xiaohongshu_uploader.main import XiaoHongShuVideo, XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED, XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE
 from utils.constant import TencentZoneTypes
 from utils.files_times import generate_schedule_time_next_day
 
@@ -71,6 +71,7 @@ def post_video_DouYin(title,files,tags,account_file,category=TencentZoneTypes.LI
     if thumbnail_portrait_path:
         thumbnail_portrait_path = str(Path(BASE_DIR / "videoFile" / thumbnail_portrait_path))
     publish_datetimes = _parse_schedule_time(schedule_time_str, len(files), enableTimer, videos_per_day, daily_times, start_days)
+    douyin_strategy = DOUYIN_PUBLISH_STRATEGY_SCHEDULED if enableTimer and schedule_time_str else DOUYIN_PUBLISH_STRATEGY_IMMEDIATE
     for index, file in enumerate(files):
         for cookie in account_file:
             print(f"文件路径{str(file)}")
@@ -83,6 +84,7 @@ def post_video_DouYin(title,files,tags,account_file,category=TencentZoneTypes.LI
                               thumbnail_portrait_path=thumbnail_portrait_path or None,
                               productLink=productLink, productTitle=productTitle,
                               desc=desc or None, ai_content=ai_content,
+                              publish_strategy=douyin_strategy,
                               headless=False)
             asyncio.run(app.douyin_upload_video(), debug=False)
 
@@ -114,13 +116,14 @@ def post_video_xhs(title,files,tags,account_file,category=TencentZoneTypes.LIFES
     # 小红书兼容：如果只有一个文件，直接传 datetime 对象而非列表
     if not enableTimer or not schedule_time_str:
         publish_datetimes = 0 if not enableTimer else publish_datetimes
+    xhs_strategy = XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED if enableTimer and schedule_time_str else XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE
     for index, file in enumerate(files):
         for cookie in account_file:
             print(f"视频文件名：{file}")
             print(f"标题：{title}")
             print(f"描述：{desc}")
             print(f"Hashtag：{tags}")
-            app = XiaoHongShuVideo(title, file, tags, publish_datetimes if not isinstance(publish_datetimes, list) else publish_datetimes[index], cookie, thumbnail_path=thumbnail_path, desc=desc or None, ai_content=ai_content, headless=False)
+            app = XiaoHongShuVideo(title, file, tags, publish_datetimes if not isinstance(publish_datetimes, list) else publish_datetimes[index], cookie, thumbnail_path=thumbnail_path, desc=desc or None, ai_content=ai_content, publish_strategy=xhs_strategy, headless=False)
             asyncio.run(app.main(), debug=False)
 
 

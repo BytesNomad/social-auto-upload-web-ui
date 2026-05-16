@@ -725,29 +725,108 @@ class BilibiliVideo(BilibiliBaseUploader):
             bilibili_logger.info(_msg("✅", "浏览器已关闭"))
 
     async def _set_schedule_time(self, page: Page, publish_date: datetime):
-        """设置定时发布（容错）"""
+        """设置定时发布 — 匹配B站新版上传页面 DOM"""
         bilibili_logger.info(
             _msg("⏰", f"设置定时发布: {publish_date.strftime('%Y-%m-%d %H:%M')}")
         )
         try:
-            schedule_radio = page.locator(
-                'label:has-text("定时发布"), '
-                '[class*="radio"]:has-text("定时发布"), '
-                '[class*="schedule"]'
-            ).first
-            await schedule_radio.wait_for(state="visible", timeout=10000)
-            await schedule_radio.click()
+            # Step 1: 点击 switch-container 开关，启用定时发布
+            switch = page.locator('.switch-container').first
+            await switch.wait_for(state="visible", timeout=10000)
+            await switch.click()
+            bilibili_logger.info(_msg("⏰", "已点击定时发布开关"))
             await asyncio.sleep(1)
 
-            date_input = page.locator(
-                'input[placeholder*="日期"], input[placeholder*="时间"], '
-                '.ant-calendar-picker input, [class*="datepicker"] input'
-            ).first
+            # Step 2: 设置日期 (yyyy-MM-dd)
+            date_str = publish_date.strftime("%Y-%m-%d")
+            date_trigger = page.locator('div.date-picker-date').first
+            await date_trigger.wait_for(state="visible", timeout=10000)
+            await date_trigger.click()
+            bilibili_logger.info(_msg("📅", f"已打开日期选择器，准备设置: {date_str}"))
+            await asyncio.sleep(1)
+
+            # 尝试在日期选择器弹窗中找到并点击目标日期
+            # B站日期选择器可能有 input 或 calendar 结构
+            date_set = False
+            # 方案 A: 弹窗中有 input 框
+            date_input = page.locator('.date-picker-date input, .bcc-datepicker input').first
             if await date_input.count() > 0:
-                await date_input.click()
-                await page.keyboard.press("Control+KeyA")
-                await page.keyboard.type(publish_date.strftime("%Y-%m-%d %H:%M"))
-                await page.keyboard.press("Enter")
+                try:
+                    await date_input.click()
+                    await page.keyboard.press("Control+KeyA")
+                    await page.keyboard.type(date_str)
+                    await page.keyboard.press("Enter")
+                    date_set = True
+                    bilibili_logger.info(_msg("📅", f"通过 input 设置日期: {date_str}"))
+                except Exception:
+                    pass
+
+            if not date_set:
+                # 方案 B: 关闭弹窗后直接用 JS 设置 p.date-show 文本并触发事件
+                try:
+                    await page.keyboard.press("Escape")
+                    await asyncio.sleep(0.5)
+                    await page.evaluate("""(dateStr) => {
+                        const el = document.querySelector('.date-picker-date .date-show');
+                        if (el) {
+                            el.textContent = dateStr;
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }""", date_str)
+                    date_set = True
+                    bilibili_logger.info(_msg("📅", f"通过 JS 设置日期: {date_str}"))
+                except Exception:
+                    pass
+
+            if not date_set:
+                bilibili_logger.warning(_msg("⚠️", f"日期设置未成功: {date_str}"))
+            await asyncio.sleep(1)
+
+            # Step 3: 设置时间 (HH:mm)
+            time_str = publish_date.strftime("%H:%M")
+            time_trigger = page.locator('div.date-picker-timer').first
+            await time_trigger.wait_for(state="visible", timeout=10000)
+            await time_trigger.click()
+            bilibili_logger.info(_msg("🕐", f"已打开时间选择器，准备设置: {time_str}"))
+            await asyncio.sleep(1)
+
+            time_set = False
+            # 方案 A: 弹窗中有 input 框
+            time_input = page.locator('.date-picker-timer input, .bcc-timepicker input').first
+            if await time_input.count() > 0:
+                try:
+                    await time_input.click()
+                    await page.keyboard.press("Control+KeyA")
+                    await time_input.fill(time_str)
+                    time_set = True
+                    bilibili_logger.info(_msg("🕐", f"通过 input 设置时间: {time_str}"))
+                except Exception:
+                    pass
+
+            if not time_set:
+                # 方案 B: 关闭弹窗后用 JS 设置
+                try:
+                    await page.keyboard.press("Escape")
+                    await asyncio.sleep(0.5)
+                    await page.evaluate("""(timeStr) => {
+                        const el = document.querySelector('.date-picker-timer .date-show');
+                        if (el) {
+                            el.textContent = timeStr;
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }""", time_str)
+                    time_set = True
+                    bilibili_logger.info(_msg("🕐", f"通过 JS 设置时间: {time_str}"))
+                except Exception:
+                    pass
+
+            if not time_set:
+                bilibili_logger.warning(_msg("⚠️", f"时间设置未成功: {time_str}"))
+            await asyncio.sleep(1)
+
+            bilibili_logger.success(_msg("✅", "定时发布设置完成"))
         except Exception as exc:
             bilibili_logger.warning(_msg("⚠️", f"设置定时发布失败: {exc}"))
 
