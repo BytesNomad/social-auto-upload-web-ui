@@ -62,7 +62,7 @@
           <div class="qr-img">
             <img :src="authorInfo.wechatQr" alt="微信二维码">
             <div class="qr-zoom">
-              <img src="/big_qrcode.jpg" alt="微信二维码">
+              <img :src="authorInfo.bigQrcode" alt="微信二维码">
             </div>
           </div>
           <p class="qr-label">微信扫码联系</p>
@@ -86,6 +86,9 @@
 
 <script setup>
 import { ref, onMounted, h } from 'vue'
+import headImg from '@/assets/head.png'
+import qrcodeImg from '@/assets/qrcode.png'
+import bigQrcodeImg from '@/assets/big_qrcode.jpg'
 
 const BlogIcon = {
   render() {
@@ -113,10 +116,11 @@ const GithubIcon = {
 
 const authorInfo = {
   name: '程序员老蔡',
-  avatar: '/head.png',
+  avatar: headImg,
   tagline: '全栈工程师 · AI 探索者 · 效率工具研究者',
   skills: ['Java', 'Spring Boot', 'Vue.js', 'React', 'Python', 'Flask', 'Playwright', 'AI 集成', '自动化'],
-  wechatQr: '/qrcode.png',
+  wechatQr: qrcodeImg,
+  bigQrcode: bigQrcodeImg,
   projects: [
     {
       name: '个人博客',
