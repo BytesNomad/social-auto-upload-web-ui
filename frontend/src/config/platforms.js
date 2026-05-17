@@ -6,14 +6,13 @@
  */
 
 // Logo 文件使用 Vite 的静态资源导入
-import logoDouyin from '@/assets/logos/logo-douyin.svg'
-import logoKuaishou from '@/assets/logos/logo-kuaishou.svg'
-import logoXiaohongshu from '@/assets/logos/logo-xiaohongshu.svg'
-import logoChannels from '@/assets/logos/logo-channels.svg'
-import logoBilibili from '@/assets/logos/logo-bilibili.svg'
-import logoBaijiahao from '@/assets/logos/logo-baijiahao.svg'
-import logoTiktok from '@/assets/logos/logo-tiktok.svg'
-import logoYoutube from '@/assets/logos/logo-youtube.svg'
+import logoDouyin from '@/assets/logos/douyin.png'
+import logoKuaishou from '@/assets/logos/kuaishou.png'
+import logoXiaohongshu from '@/assets/logos/xiaohongshu.png'
+import logoChannels from '@/assets/logos/shipinhao.png'
+import logoBilibili from '@/assets/logos/bilibili.png'
+import logoBaijiahao from '@/assets/logos/baijiahao.png'
+import logoYoutube from '@/assets/logos/youtube.png'
 
 export const PLATFORMS = {
   XIAOHONGSHU: {
@@ -215,7 +214,7 @@ export const PLATFORMS = {
     name: 'TikTok',
     shortName: 'TT',
     letter: 'T',
-    logo: logoTiktok,
+    logo: null,
     color: '#000000',
     bgColor: 'rgba(0, 0, 0, 0.15)',
     cssClass: 'tiktok',
